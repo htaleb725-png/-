@@ -12,7 +12,9 @@ import {
   DynamicField,
   DocumentArchiveItem,
   WhatsAppTemplate,
-  SystemSettings
+  SystemSettings,
+  WorkflowStage,
+  WorkflowAction
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -74,6 +76,8 @@ interface AppContextType {
 
   organizationRecords: OrganizationRecord[];
   upsertOrgRecord: (record: Omit<OrganizationRecord, 'Org_ID' | 'UpdatedAt'>) => void;
+  addOrganizationRecord: (record: Omit<OrganizationRecord, 'Org_ID' | 'UpdatedAt'>) => void;
+  updateOrganizationRecord: (record: OrganizationRecord) => void;
 
   dropdowns: DropdownItem[];
   addDropdownItem: (category: string, value: string) => void;
@@ -109,6 +113,9 @@ interface AppContextType {
   setPrintableBadgeCitizen: (citizen: Citizen | null) => void;
   selectedCitizenForHistory: Citizen | null;
   setSelectedCitizenForHistory: (citizen: Citizen | null) => void;
+
+  forwardCitizenWorkflow: (citizenId: string, toStage: WorkflowStage, directiveNote?: string, targetEntity?: string) => void;
+  forwardRequestWorkflow: (requestId: string, toStage: WorkflowStage, directiveNote?: string) => void;
 
   canPrintOfficialCard: (user: User | null) => boolean;
   exportToExcel: (data: any[], fileName: string) => void;
@@ -323,7 +330,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const login = (username: string, pass: string): boolean => {
-    const user = users.find(u => u.Username.toLowerCase() === username.toLowerCase().trim() && (u.Password === pass || pass === '123'));
+    const cleanUser = username.toLowerCase().trim();
+    const user = users.find(u => 
+      (u.Username.toLowerCase() === cleanUser || u.User_ID.toLowerCase() === cleanUser || u.FullName.toLowerCase().includes(cleanUser)) && 
+      (u.Password === pass || pass === '123')
+    );
+
     if (user) {
       if (user.Status === 'frozen') {
         alert('تم تجميد هذا الحساب من قبل الإدارة. يرجى مراجعة المطور أو مدير المكتب.');
@@ -332,26 +344,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentUser(user);
       setIsSplashOpen(false);
 
-      // Auto-route by RBAC role
-      if (user.Role === 'reception') {
+      // Strict Auto-route by RBAC role into authorized department
+      if (user.Role === 'reception' || user.Role === 'reception_officer') {
         setActiveSection('reception');
-      } else if (user.Role === 'admin') {
+      } else if (user.Role === 'admin' || user.Role === 'admin_officer') {
         setActiveSection('admin');
+      } else if (user.Role === 'director') {
+        setActiveSection('director');
       } else if (user.Role === 'deputy') {
         setActiveSection('interviews');
-      } else if (user.Role === 'organization') {
+      } else if (user.Role === 'interviews_officer') {
+        setActiveSection('interviews');
+      } else if (user.Role === 'organization' || user.Role === 'organization_officer') {
         setActiveSection('organization');
-      } else if (user.Role === 'archive') {
-        setActiveSection('search_archive');
+      } else if (user.Role === 'machine' || user.Role === 'machine_officer') {
+        setActiveSection('machine');
       } else if (user.Role === 'audit') {
         setActiveSection('audit');
-      } else if (user.Role === 'machine') {
-        setActiveSection('machine');
+      } else if (user.Role === 'archive') {
+        setActiveSection('search_archive');
+      } else if (user.Role === 'developer') {
+        setActiveSection('master_admin');
       } else {
         setActiveSection('dashboard');
       }
 
-      addAuditLog('تسجيل دخول ناجح', 'نظام المصادقة', `قام المستخدم ${user.FullName} بتسجيل الدخول إلى النظام`);
+      addAuditLog('تسجيل دخول ناجح', 'نظام المصادقة', `قام المستخدم ${user.FullName} (${user.RoleArabic}) بتسجيل الدخول`);
       return true;
     }
     return false;
@@ -461,7 +479,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (citizenData.Education) addDropdownItem('Education', citizenData.Education);
     if (citizenData.ReferralSource) addDropdownItem('ReferralSource', citizenData.ReferralSource);
 
-    addAuditLog('تسجيل مواطن جديد', 'الاستعلامات', `تم إنشاء سجل للمواطن ${fullName} بالرقم ${newCitizenId}`);
+    addAuditLog('تسجيل مواطن جديد بالاستعلامات', 'الاستعلامات', `تسجيل المراجع ${fullName} (${newCitizenId}) من ${citizenData.District || 'ذي قار'} - هاتف: ${newCitizen.Phone1}`);
+
+    // Instant Real-Time Notification to Office Director & Admin Officer
+    const receptionNotif: UrgentNotification = {
+      id: `N-${Date.now().toString().slice(-6)}`,
+      title: `📥 وارد استعلامات: ${fullName}`,
+      message: `تسجيل مراجع جديد من الاستعلامات (${newCitizenId}) - ${newCitizen.District} | هاتف: ${newCitizen.Phone1} | التقييم: ${newCitizen.Rating || 'لائق'}`,
+      timestamp: 'الآن',
+      type: 'urgent_request',
+      linkSection: 'director',
+      read: false
+    };
+    setNotifications(prev => [receptionNotif, ...prev]);
 
     return newCitizen;
   };
@@ -716,6 +746,132 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
+  const forwardCitizenWorkflow = (
+    citizenId: string,
+    toStage: WorkflowStage,
+    directiveNote?: string,
+    targetEntity?: string
+  ) => {
+    const cit = citizens.find(c => c.Citizen_ID === citizenId);
+    if (!cit) return;
+
+    const fromStage = cit.CurrentStage || 'الاستعلامات';
+    const now = new Date();
+    const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const newAction: WorkflowAction = {
+      id: `WF-${Date.now().toString().slice(-6)}`,
+      fromStage: fromStage,
+      toStage: toStage,
+      fromUser: currentUser ? `${currentUser.FullName} (${currentUser.RoleArabic})` : 'النظام',
+      actionDate: formattedDate,
+      directiveNote: directiveNote || undefined,
+      statusText: `تمت الإحالة من ${fromStage} إلى ${toStage}`,
+      targetEntity: targetEntity
+    };
+
+    const updatedHistory = [newAction, ...(cit.WorkflowHistory || [])];
+
+    const updatedCitizen: Citizen = {
+      ...cit,
+      CurrentStage: toStage,
+      WorkflowHistory: updatedHistory
+    };
+
+    setCitizens(prev => prev.map(c => c.Citizen_ID === citizenId ? updatedCitizen : c));
+
+    // Audit log
+    addAuditLog('إحالة مسار المراجع', 'سلسلة الإحالات', `تمت إحالة المراجع ${cit.FullName} (${cit.Citizen_ID}) من [${fromStage}] إلى [${toStage}] - توجيه: ${directiveNote || 'متابعة وإجراء اللازم'}`);
+
+    // If referred to Director
+    if (toStage === 'مدير المكتب') {
+      setNotifications(prev => [{
+        id: `N-${Date.now().toString().slice(-6)}`,
+        title: `🏛️ إحالة مراجع إلى مدير المكتب: ${cit.FullName}`,
+        message: `وارد استعلامات محال إلى مدير المكتب (${cit.Citizen_ID}) - ${cit.District} | ملاحظة: ${directiveNote || 'مراجعة وتوجيه'}`,
+        timestamp: 'الآن',
+        type: 'urgent_request',
+        linkSection: 'director',
+        read: false
+      }, ...prev]);
+    }
+
+    // If referred to Admin
+    if (toStage === 'مدير الإدارة') {
+      setNotifications(prev => [{
+        id: `N-${Date.now().toString().slice(-6)}`,
+        title: `📋 إحالة معاملة إلى مدير الإدارة: ${cit.FullName}`,
+        message: `تم توجيه ملف المراجع (${cit.Citizen_ID}) للإدارة لإعداد الكتاب الرسمي ومسح المستندات. التوجيه: ${directiveNote || 'إعداد كتاب ومتابعة'}`,
+        timestamp: 'الآن',
+        type: 'urgent_request',
+        linkSection: 'admin',
+        read: false
+      }, ...prev]);
+    }
+
+    // If referred to Organization
+    if (toStage === 'مدير التنظيم') {
+      // Auto-upsert into organization records if not exists
+      const existingOrg = organizationRecords.find(o => o.Citizen_ID === citizenId);
+      if (!existingOrg) {
+        upsertOrgRecord({
+          Citizen_ID: cit.Citizen_ID,
+          FullName: cit.FullName,
+          District: cit.District,
+          SubDistrict: cit.SubDistrict,
+          Phone1: cit.Phone1,
+          OrgRating: 'مؤيد',
+          InfluenceType: 'وجيه منطقة',
+          EvaluationPoints: 85,
+          Notes: `محال من ${fromStage}. توجيه: ${directiveNote || 'توثيق تنظيمي ومتابعة الثقل الجماهيري'}`
+        });
+      }
+
+      setNotifications(prev => [{
+        id: `N-${Date.now().toString().slice(-6)}`,
+        title: `👥 إحالة ملف تنظيمي وجماهيري: ${cit.FullName}`,
+        message: `تمت إحالة المراجع (${cit.Citizen_ID}) إلى قسم التنظيم والجمهور للمتابعة الميدانية والانتخابية.`,
+        timestamp: 'الآن',
+        type: 'urgent_request',
+        linkSection: 'organization',
+        read: false
+      }, ...prev]);
+    }
+  };
+
+  const forwardRequestWorkflow = (
+    requestId: string,
+    toStage: WorkflowStage,
+    directiveNote?: string
+  ) => {
+    const req = requests.find(r => r.Request_ID === requestId);
+    if (!req) return;
+
+    const fromStage = req.CurrentStage || 'مدير الإدارة';
+    const now = new Date();
+    const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const newAction: WorkflowAction = {
+      id: `WF-REQ-${Date.now().toString().slice(-6)}`,
+      fromStage: fromStage,
+      toStage: toStage,
+      fromUser: currentUser ? `${currentUser.FullName} (${currentUser.RoleArabic})` : 'النظام',
+      actionDate: formattedDate,
+      directiveNote: directiveNote || undefined,
+      statusText: `تمت إحالة الطلب ${requestId} إلى ${toStage}`
+    };
+
+    const updatedReq: OfficeRequest = {
+      ...req,
+      CurrentStage: toStage,
+      WorkflowHistory: [newAction, ...(req.WorkflowHistory || [])],
+      DeputyNotes: directiveNote ? (req.DeputyNotes ? `${req.DeputyNotes} | [${toStage}]: ${directiveNote}` : directiveNote) : req.DeputyNotes
+    };
+
+    setRequests(prev => prev.map(r => r.Request_ID === requestId ? updatedReq : r));
+    addAuditLog('إحالة مسار طلب إداري', 'قسم الإدارة', `تمت إحالة الطلب ${requestId} إلى ${toStage}`);
+  };
+
   // Check RBAC permission for printing the official ID card:
   // "زر وميزة طباعة بطاقة المعلومات من البحث الشامل مقتصرة فقط حصرياً على: [المطور، المدير، موظف الإدارة]"
   const canPrintOfficialCard = (user: User | null): boolean => {
@@ -787,6 +943,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         convertInterviewToRequest,
         organizationRecords,
         upsertOrgRecord,
+        addOrganizationRecord: upsertOrgRecord,
+        updateOrganizationRecord: (rec: OrganizationRecord) => upsertOrgRecord(rec),
         dropdowns,
         addDropdownItem,
         removeDropdownItem,
@@ -815,6 +973,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setPrintableBadgeCitizen,
         selectedCitizenForHistory,
         setSelectedCitizenForHistory,
+        forwardCitizenWorkflow,
+        forwardRequestWorkflow,
         canPrintOfficialCard,
         exportToExcel,
         resetToDefaultData,

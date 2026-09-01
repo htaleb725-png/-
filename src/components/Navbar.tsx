@@ -156,44 +156,33 @@ export const Navbar: React.FC = () => {
             </button>
 
             {showRoleDropdown && (
-              <div className="absolute left-0 mt-2 w-72 rounded-xl bg-white border border-slate-200 shadow-xl p-3 space-y-2 z-50 text-right text-slate-800">
-                <div className="px-2 py-1 border-b border-slate-100">
-                  <span className="text-[11px] font-bold text-slate-500 block">التبديل السريع بين الأدوار (RBAC):</span>
-                </div>
-
-                <div className="max-h-64 overflow-y-auto space-y-1">
-                  {users.map((u) => (
-                    <div
-                      key={u.User_ID}
-                      onClick={() => {
-                        switchUser(u);
-                        setShowRoleDropdown(false);
-                      }}
-                      className={`p-2 rounded-lg flex items-center justify-between text-xs cursor-pointer transition-colors ${
-                        currentUser?.User_ID === u.User_ID ? 'bg-blue-50 text-blue-800 font-bold border border-blue-200' : 'hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <div>
-                        <div className="font-semibold text-slate-900">{u.FullName}</div>
-                        <div className="text-[10px] text-slate-500">{u.RoleArabic}</div>
-                      </div>
-                      {currentUser?.User_ID === u.User_ID && (
-                        <Check className="w-4 h-4 text-blue-600" />
-                      )}
+              <div className="absolute left-0 mt-2 w-72 rounded-xl bg-white border border-slate-200 shadow-xl p-3 space-y-3 z-50 text-right text-slate-800">
+                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
+                      {currentUser?.FullName.slice(0, 1)}
                     </div>
-                  ))}
+                    <div>
+                      <div className="font-bold text-xs text-slate-900">{currentUser?.FullName}</div>
+                      <div className="text-[10px] text-blue-700 font-semibold">{currentUser?.RoleArabic}</div>
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-200 flex items-center justify-between">
+                    <span>القسم: {currentUser?.Department}</span>
+                    <span className="font-mono text-slate-400 font-bold">{currentUser?.User_ID}</span>
+                  </div>
                 </div>
 
-                <div className="pt-2 border-t border-slate-100">
+                <div className="pt-1">
                   <button
                     onClick={() => {
                       logout();
                       setShowRoleDropdown(false);
                     }}
-                    className="w-full py-1.5 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border border-red-200"
+                    className="w-full py-2 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border border-red-200 shadow-2xs"
                   >
                     <LogOut className="w-3.5 h-3.5" />
-                    <span>تسجيل الخروج من النظام</span>
+                    <span>تسجيل الخروج والتبديل لحساب آخر</span>
                   </button>
                 </div>
               </div>

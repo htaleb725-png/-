@@ -32,6 +32,19 @@ export type CitizenRating = 'لائق' | 'غير لائق' | 'قلق' | 'غير 
 export type Gender = 'ذكر' | 'أنثى';
 export type OrgRating = 'مؤيد' | 'محايد' | 'ضعيف' | 'متردد' | 'معارض' | 'كادر قيادي' | 'شخصية مؤثرة' | string;
 
+export type WorkflowStage = 'الاستعلامات' | 'مدير المكتب' | 'مدير الإدارة' | 'مدير التنظيم' | 'مكتمل';
+
+export interface WorkflowAction {
+  id: string;
+  fromStage: WorkflowStage | string;
+  toStage: WorkflowStage | string;
+  fromUser: string;
+  actionDate: string;
+  directiveNote?: string;
+  statusText?: string;
+  targetEntity?: string;
+}
+
 export interface Citizen {
   Citizen_ID: string;
   FirstName: string;
@@ -51,6 +64,8 @@ export interface Citizen {
   ReferralSource?: string;
   CreatedAt: string;
   CreatedBy?: string;
+  CurrentStage?: WorkflowStage;
+  WorkflowHistory?: WorkflowAction[];
   CustomFields?: Record<string, string | number | boolean>;
   PhotoUrl?: string;
 }
@@ -73,6 +88,8 @@ export interface OfficeRequest {
   AttachmentResponse?: string; // الطلب المستلم / كتاب الإجابة
   CreatedAt: string;
   CreatedBy: string;
+  CurrentStage?: WorkflowStage;
+  WorkflowHistory?: WorkflowAction[];
   DeputyNotes?: string;
   ExecutiveAction?: string;
   CustomFields?: Record<string, string | number | boolean>;

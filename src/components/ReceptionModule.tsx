@@ -50,6 +50,12 @@ export const ReceptionModule: React.FC = () => {
   const [referralSource, setReferralSource] = useState('مباشر بدون معرف');
   const [customReferral, setCustomReferral] = useState('');
 
+  // Optional on-the-spot request creation during registration
+  const [initialRequestEntity, setInitialRequestEntity] = useState('وزارة العمل والشؤون الاجتماعية (شبكة الحماية)');
+  const [customInitialEntity, setCustomInitialEntity] = useState('');
+  const [initialRequestPriority, setInitialRequestPriority] = useState<'عاجل' | 'عام' | 'خاص جداً'>('عام');
+  const [initialRequestDetails, setInitialRequestDetails] = useState('');
+
   // New Request Form for existing citizen
   const [reqEntity, setReqEntity] = useState('وزارة العمل والشؤون الاجتماعية (شبكة الحماية)');
   const [customEntity, setCustomEntity] = useState('');
@@ -92,6 +98,10 @@ export const ReceptionModule: React.FC = () => {
     setCustomSubDistrict('');
     setReferralSource('مباشر بدون معرف');
     setCustomReferral('');
+    setInitialRequestEntity('وزارة العمل والشؤون الاجتماعية (شبكة الحماية)');
+    setCustomInitialEntity('');
+    setInitialRequestPriority('عام');
+    setInitialRequestDetails('');
   };
 
   const handleRegisterCitizen = (e: React.FormEvent) => {
@@ -127,9 +137,25 @@ export const ReceptionModule: React.FC = () => {
       ReferralSource: finalReferral
     });
 
+    // If initial request was provided, automatically create it and link it
+    if (initialRequestDetails.trim()) {
+      const finalInitialEntity = initialRequestEntity === 'أخرى' && customInitialEntity ? customInitialEntity.trim() : initialRequestEntity;
+      addRequest({
+        Citizen_ID: newCit.Citizen_ID,
+        CitizenName: newCit.FullName,
+        CitizenPhone: newCit.Phone1,
+        Entity: finalInitialEntity,
+        RequestStatus: 'مستلم',
+        ProcessingStatus: 'قيد التدقيق',
+        Priority: initialRequestPriority,
+        Details: initialRequestDetails.trim(),
+        CreatedBy: currentUser ? currentUser.FullName : 'قسم الاستعلامات'
+      });
+    }
+
     setShowAddModal(false);
     setSelectedCitizen(newCit);
-    setSuccessMessage(`تم بنجاح تسجيل المراجع برقم تعريفي موحد (${newCit.Citizen_ID})`);
+    setSuccessMessage(`تم بنجاح تسجيل المراجع برقم تعريفي موحد (${newCit.Citizen_ID}) وظهور بياناته فوراً لمدير المكتب والإدارة.`);
     resetForm();
 
     // Offer to print badge immediately
@@ -584,6 +610,67 @@ export const ReceptionModule: React.FC = () => {
                       className="w-full mt-1.5 px-3 py-1.5 rounded-lg bg-white border border-blue-400 text-slate-900 text-xs text-right"
                     />
                   )}
+                </div>
+              </div>
+
+              {/* Direct Request / Visit Cause Section (Auto forwards to Director and Admin) */}
+              <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200 space-y-2.5 text-right">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
+                    <span>📌 سبب الزيارة أو تفاصيل الطلب الأولي (يظهر فوراً لمدير المكتب ومسؤول الإدارة)</span>
+                  </span>
+                  <span className="text-[10px] text-blue-700 font-semibold bg-white px-2 py-0.5 rounded border border-blue-200">
+                    مزامنة فورية
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">الجهة الحكومية الموجه إليها الطلب</label>
+                    <select
+                      value={initialRequestEntity}
+                      onChange={(e) => setInitialRequestEntity(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs text-right outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {getDropdownOptions('Entity').map((ent, idx) => (
+                        <option key={idx} value={ent}>{ent}</option>
+                      ))}
+                      <option value="أخرى">+ أخرى</option>
+                    </select>
+                    {initialRequestEntity === 'أخرى' && (
+                      <input
+                        type="text"
+                        value={customInitialEntity}
+                        onChange={(e) => setCustomInitialEntity(e.target.value)}
+                        placeholder="اكتب الجهة..."
+                        className="w-full mt-1 px-2.5 py-1 rounded bg-white border border-blue-300 text-xs"
+                      />
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">درجة الأهمية / الأولوية</label>
+                    <select
+                      value={initialRequestPriority}
+                      onChange={(e) => setInitialRequestPriority(e.target.value as any)}
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs text-right outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="عام">عام (اعتيادي)</option>
+                      <option value="عاجل">🚨 عاجل (إشعار فوري)</option>
+                      <option value="خاص جداً">⭐ خاص جداً (عالي الأهمية)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">تفاصيل وموضوع الطلب أو الشكوى</label>
+                  <textarea
+                    value={initialRequestDetails}
+                    onChange={(e) => setInitialRequestDetails(e.target.value)}
+                    placeholder="اكتب تفاصيل طلب المواطن أو سبب حضوره للمكتب ليتم إحالته مباشرة للمدير والإدارة..."
+                    rows={2}
+                    className="w-full px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs text-right outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  />
                 </div>
               </div>
 
